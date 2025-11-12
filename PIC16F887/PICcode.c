@@ -57,3 +57,76 @@ void Melody_Victory_LostWoods() {
     play(NOTE_D4, s); play(NOTE_E4, s); play(NOTE_G4, s+100);
     play(NOTE_E4, s+160);
 }
+
+// ---- MELODÍA DERROTA: Secuencia La menor ----
+void Melody_Defeat_Sad() {
+    play(NOTE_A4, 220); play(NOTE_G4, 220); play(NOTE_F4, 240);
+    play(NOTE_E4, 260); play(NOTE_D4, 280); play(NOTE_C4, 360);
+    Delay_ms(80);
+    play(NOTE_E4, 220); play(NOTE_C4, 360);
+    play(NOTE_E4, 360); play(NOTE_C4, 220);
+}
+
+// ---- ISR INT0: flanco en RB0 para leer RD1..RD0 ----
+void interrupt(void) {
+    if (INTF_bit) {
+        Delay_us(8);                // settle del bus
+        d_bus = PORTD & 0x03;       // RD1..RD0
+
+        // Decodifica: prioridad a la señal alta que llegue
+        // RD1=1 -> Victoria, RD0=1 -> Derrota (si ambas 0 o 1, se ignora)
+        if((d_bus & 0x02) && !(d_bus & 0x01)){
+            if (!sound_busy) { current_cmd = CMD_VICTORY; new_cmd = 1; }
+            else             { pending_cmd = CMD_VICTORY; }
+        }
+        else if((d_bus & 0x01) && !(d_bus & 0x02)){
+            if (!sound_busy) { current_cmd = CMD_DEATH; new_cmd = 1; }
+            else             { pending_cmd = CMD_DEATH; }
+        }
+        INTF_bit = 0;               // se limpia flag
+    }
+}
+
+void main() {
+    // Digital I/O
+    ANSEL  = 0; ANSELH = 0;
+    C1ON_bit = 0; C2ON_bit = 0;
+
+    TRISB = 0xFF;           // RB0 como entrada (INT0)
+    TRISD = 0xFF;           // RD1..RD0 entradas (bus 2 bits)
+    TRISC = 0b11111011;     // RC2 salida (0=out)
+    PORTB = 0; PORTC = 0; PORTD = 0;
+
+    Sound_Init(&PORTC, 2);  // RC2 (C.2)
+
+    // INT0 en flanco ascendente
+    INTEDG_bit = 1;   // flanco
+    INTF_bit  = 0;
+    INTE_bit  = 1;    // enable INT0
+    GIE_bit   = 1;    // enable global
+
+    while(1) {
+        if (new_cmd) {
+            unsigned char cmd = current_cmd;
+            new_cmd = 0;
+            sound_busy = 1;
+
+            switch (cmd) {
+                case CMD_VICTORY: Melody_Victory_LostWoods(); break;
+                case CMD_DEATH:   Melody_Defeat_Sad();        break;
+                default: break;
+            }
+
+            sound_busy = 0;
+
+            // se encadena si quedo algo pendiente
+            if (pending_cmd != CMD_NONE) {
+                current_cmd = pending_cmd;
+                pending_cmd = CMD_NONE;
+                new_cmd = 1;
+            }
+        }
+    }
+}
+
+
